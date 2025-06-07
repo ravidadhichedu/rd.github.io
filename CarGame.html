@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Mini Car Dodge</title>
+<style>
+    html,body{margin:0;padding:0;background:#111;touch-action:none;user-select:none;font-family:sans-serif;color:#fff}
+    #hud{position:absolute;top:0;left:0;width:100%;padding:6px 10px;display:flex;justify-content:space-between;font-size:14px;font-weight:600}
+    #canvas{display:block;margin:0 auto;background:#222;touch-action:none}
+    .btn{position:absolute;bottom:0;width:50%;height:100%;opacity:0}     /* invisible full‑height touch zones */
+    #left{left:0}
+    #right{right:0}
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="hud"><span id="score">Score: 0</span><span id="lives">❤️ 3</span></div>
+<div id="left"  class="btn"></div>
+<div id="right" class="btn"></div>
+
+<script>
+const cvs   = document.getElementById('canvas');
+const ctx   = cvs.getContext('2d');
+const hudS  = document.getElementById('score');
+const hudL  = document.getElementById('lives');
+
+let W, H;
+function resize(){
+  W = cvs.width  = window.innerWidth;
+  H = cvs.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ----------  Game constants  ---------- */
+const carW    = 40, carH = 80;
+const laneW   = 60;                         // virtual lane width (for spawn columns)
+const speed0  = 4;                          // initial fall speed
+const spawnCD0= 70;                         // spawn cooldown frames
+const rewardRate = 0.15;                    // chance an item is a reward
+const lifeRate   = 0.25;                    // portion of reward that are hearts
+const maxLives   = 5;
+
+/* ----------  Game state  ---------- */
+let car  = { x: W/2 - carW/2, y: H - carH - 10, vx:0 };
+let objs = [];                              // falling objects
+let frame=0, score=0, lives=3, playing=true;
+
+/* ----------  Input  ---------- */
+let leftHeld=false, rightHeld=false;
+function setDir(e, val){
+  if(e.target.id==="left")  leftHeld  = val;
+  if(e.target.id==="right") rightHeld = val;
+}
+document.getElementById('left' ).addEventListener('touchstart',e=>{setDir(e,1);});
+document.getElementById('right').addEventListener('touchstart',e=>{setDir(e,1);});
+document.getElementById('left' ).addEventListener('touchend'  ,e=>{setDir(e,0);});
+document.getElementById('right').addEventListener('touchend'  ,e=>{setDir(e,0);});
+window.addEventListener('keydown',e=>{
+  if(e.code==='ArrowLeft')  leftHeld  = true;
+  if(e.code==='ArrowRight') rightHeld = true;
+});
+window.addEventListener('keyup',e=>{
+  if(e.code==='ArrowLeft')  leftHeld  = false;
+  if(e.code==='ArrowRight') rightHeld = false;
+});
+
+/* ----------  Helpers  ---------- */
+function rand(a,b){return a+Math.random()*(b-a);}
+function collide(a,b){
+  return !(a.x+a.w < b.x || a.x > b.x+b.w || a.y+a.h < b.y || a.y > b.y+b.h);
+}
+
+/* ----------  Main loop  ---------- */
+function loop(){
+  if(!playing){drawGameOver(); return;}
+  frame++;
+  ctx.clearRect(0,0,W,H);
+
+  /* Move car */
+  const speedX = 6;
+  car.vx = (rightHeld - leftHeld) * speedX;
+  car.x += car.vx;
+  if(car.x<0) car.x=0;
+  if(car.x+carW>W) car.x = W-carW;
+
+  /* Spawn obstacles / rewards */
+  const cooldown = Math.max(15, spawnCD0 - Math.floor(score/200));
+  if(frame % cooldown === 0){
+    const col = Math.floor(rand(0, W / laneW));
+    const x   = col * laneW + laneW/2 - 15;
+    const isReward = Math.random() < rewardRate;
+    let type, color;
+    if(isReward){
+      const heart = Math.random() < lifeRate;
+      type  = heart ? 'life' : 'score';
+      color = heart ? '#e33' : '#ff0';
+    }else{
+      type  = 'bad';
+      color = '#0bf';
+    }
+    objs.push({x, y:-30, w:30, h:30, type, color});
+  }
+
+  /* Update objects */
+  const fallSpeed = speed0 + score/100;
+  objs.forEach(o=>{o.y += fallSpeed;});
+  objs = objs.filter(o=>o.y < H+50);
+
+  /* Collision detection */
+  objs.forEach(o=>{
+    if(collide({...o},{x:car.x,y:car.y,w:carW,h:carH})){
+      if(o.type==='bad'){
+        lives--;
+        flash('#ff404044');
+      }else if(o.type==='life' && lives<maxLives){
+        lives++;
+        flash('#44ff4444');
+      }else if(o.type==='score'){
+        score+=50;
+        flash('#ffff4444');
+      }
+      o.y = H+100; // remove
+    }
+  });
+
+  /* Draw car */
+  ctx.fillStyle = '#f50';
+  ctx.fillRect(car.x, car.y, carW, carH);
+
+  /* Draw objects */
+  objs.forEach(o=>{
+    ctx.fillStyle = o.color;
+    ctx.fillRect(o.x, o.y, o.w, o.h);
+    if(o.type==='life'){           // draw a little heart
+      ctx.fillStyle='#fff';
+      ctx.font='20px sans-serif';
+      ctx.fillText('❤️', o.x+3, o.y+23);
+    }
+  });
+
+  /* Update HUD */
+  if(frame % 5 === 0) score++;     // passive points
+  hudS.textContent = `Score: ${score}`;
+  hudL.textContent = '❤️ '.repeat(lives) + lives;
+
+  /* Check game over */
+  if(lives<=0) playing=false;
+
+  requestAnimationFrame(loop);
+}
+
+/* ----------  Flash effect  ---------- */
+let flashAlpha=0, flashColor='';
+function flash(col){
+  flashColor=col; flashAlpha=1;
+}
+function drawGameOver(){
+  ctx.fillStyle='#0008';
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#fff';
+  ctx.font='36px sans-serif';
+  ctx.textAlign='center';
+  ctx.fillText('GAME OVER', W/2, H/2-20);
+  ctx.font='24px sans-serif';
+  ctx.fillText(`Score: ${score}`, W/2, H/2+20);
+  ctx.fillText('Tap to restart', W/2, H/2+60);
+  cvs.addEventListener('touchstart', restartOnce, {once:true});
+  window.addEventListener('keydown', restartOnce, {once:true});
+}
+
+function restartOnce(){
+  objs.length=0;
+  car.x=W/2-carW/2;
+  lives=3; score=0; frame=0; playing=true;
+  requestAnimationFrame(loop);
+}
+
+/* ----------  Start  ---------- */
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
